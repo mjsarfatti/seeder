@@ -12,6 +12,9 @@ Edit `.env` — set at minimum:
 
 ## 2. Run (pre-built image from Docker Hub)
 
+The Compose file pulls `mrtimothyduong/seeder:latest`, which is published for
+both amd64 and arm64.
+
 ```sh
 docker compose pull
 docker compose up -d
