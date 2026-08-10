@@ -15,6 +15,9 @@ Edit `.env` — set at minimum:
 The Compose file pulls the official `ghcr.io/danielsyauqi/seeder:latest` image,
 which is published for both amd64 and arm64.
 
+The same image is also mirrored to Docker Hub as
+`danielsyauqi/seeder-oss:latest`.
+
 ```sh
 docker compose pull
 docker compose up -d
@@ -41,7 +44,7 @@ Build the image for the current platform:
 docker build --tag seeder:local .
 ```
 
-Maintainers publish the multi-platform GHCR image through the
+Maintainers publish the multi-platform GHCR and Docker Hub images through the
 `Publish container image` GitHub Actions workflow. Pushes to `main` publish
 `latest` and an immutable `sha-<commit>` tag; version tags such as `v2.1.0`
 also publish `2.1.0` and `2.1` tags.
