@@ -1,6 +1,6 @@
 "use client";
 
-import Link, { useLinkStatus } from "next/link";
+import Link from "next/link";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import {
@@ -72,16 +72,19 @@ type AppSidebarProps = {
 const SIDEBAR_RENDER_VERSION = "2026-05-04.3";
 const SIDEBAR_PROJECT_CAP = 8;
 
-// Shared client-navigation state for the sidebar links. `onNavigate` flips
-// `isNavigating` on the first click; it clears on the next pathname change.
+// Which sidebar link href is mid-navigation. Drives the optimistic active row
+// and is cleared on the next pathname change (see AppSidebar).
 const SidebarNavContext = createContext<{
-  isNavigating: boolean;
-  onNavigate: () => void;
-}>({ isNavigating: false, onNavigate: () => {} });
+  pendingHref: string | null;
+  setPendingHref: (href: string | null) => void;
+}>({ pendingHref: null, setPendingHref: () => {} });
 
 // One draggable row in the sidebar Project List. The whole row is the sortable
 // node; a grip handle (shown on hover, desktop only) carries the drag listeners
 // so the card's link stays clickable and touch-scrolling the sidebar still works.
+//
+// On click the row shows its active treatment and a pulse right away; the
+// previously-active row drops its treatment until the new route commits.
 function SidebarProjectRow({
   project,
   href,
@@ -102,56 +105,9 @@ function SidebarProjectRow({
     transition,
     isDragging,
   } = useSortable({ id: project.id, disabled: !draggable });
-  const { onNavigate } = useContext(SidebarNavContext);
-
-  return (
-    <li
-      ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={cn("group/proj relative", isDragging && "z-20 opacity-90")}
-    >
-      <Link
-        href={href}
-        className="block"
-        onNavigate={isActive ? undefined : onNavigate}
-      >
-        <SidebarProjectRowBody
-          project={project}
-          isActive={isActive}
-          draggable={draggable}
-        />
-      </Link>
-      {draggable ? (
-        <button
-          type="button"
-          ref={setActivatorNodeRef}
-          {...attributes}
-          {...listeners}
-          aria-label={`Reorder ${project.name}`}
-          className="absolute right-2 top-2 hidden cursor-grab touch-none rounded-sm p-0.5 text-muted opacity-0 transition hover:text-foreground group-hover/proj:opacity-100 active:cursor-grabbing md:block"
-        >
-          <DotsSixVertical className="size-4" />
-        </button>
-      ) : null}
-    </li>
-  );
-}
-
-// Visual body of a project row, split out so `useLinkStatus` can read this
-// link's own navigation state. While a click is pending the row takes the
-// active treatment (edge marker or colored fill) and a soft pulse.
-function SidebarProjectRowBody({
-  project,
-  isActive,
-  draggable,
-}: {
-  project: ProjectListItem;
-  isActive: boolean;
-  draggable: boolean;
-}) {
-  const { pending } = useLinkStatus();
-  const { isNavigating } = useContext(SidebarNavContext);
-  const active = pending || (isActive && !isNavigating);
+  const { pendingHref, setPendingHref } = useContext(SidebarNavContext);
+  const pending = pendingHref === href;
+  const active = pending || (isActive && !pendingHref);
 
   const hasColor = Boolean(project.color);
   // Colored rows: soft tint when idle, deepen + invert text to white when
@@ -170,48 +126,70 @@ function SidebarProjectRowBody({
     : undefined;
 
   return (
-    <span
-      className={cn(
-        "relative block rounded-sm py-1.5 pl-3 pr-2 transition",
-        active
-          ? hasColor
-            ? null
-            : "bg-accent-soft"
-          : hasColor
-            ? null
-            : "hover:bg-surface",
-        pending && "animate-pulse motion-reduce:animate-none",
-      )}
-      style={colorStyle}
+    <li
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn("group/proj relative", isDragging && "z-20 opacity-90")}
     >
-      {active && !hasColor ? (
-        <span
-          aria-hidden
-          className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-accent animate-breathe"
-        />
-      ) : null}
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p
+      <Link
+        href={href}
+        // Clicking the active link never changes the pathname, so it must not
+        // arm the pending flag.
+        onNavigate={isActive ? undefined : () => setPendingHref(href)}
+        className={cn(
+          "relative block rounded-sm py-1.5 pl-3 pr-2 transition",
+          active
+            ? hasColor
+              ? null
+              : "bg-accent-soft"
+            : hasColor
+              ? null
+              : "hover:bg-surface",
+          pending && "animate-pulse motion-reduce:animate-none",
+        )}
+        style={colorStyle}
+      >
+        {active && !hasColor ? (
+          <span
+            aria-hidden
+            className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-accent animate-breathe"
+          />
+        ) : null}
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p
+              className={cn(
+                "truncate text-[13px] font-medium",
+                active ? "text-foreground" : "text-muted-strong",
+              )}
+            >
+              {project.name}
+            </p>
+            <p className="mt-0.5 inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.04em] text-muted">
+              {formatProjectStatus(project.status)}
+            </p>
+          </div>
+          <Kanban
             className={cn(
-              "truncate text-[13px] font-medium",
-              active ? "text-foreground" : "text-muted-strong",
+              "mt-0.5 size-4 shrink-0 text-muted transition",
+              draggable && "md:group-hover/proj:opacity-0",
             )}
-          >
-            {project.name}
-          </p>
-          <p className="mt-0.5 inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.04em] text-muted">
-            {formatProjectStatus(project.status)}
-          </p>
+          />
         </div>
-        <Kanban
-          className={cn(
-            "mt-0.5 size-4 shrink-0 text-muted transition",
-            draggable && "md:group-hover/proj:opacity-0",
-          )}
-        />
-      </div>
-    </span>
+      </Link>
+      {draggable ? (
+        <button
+          type="button"
+          ref={setActivatorNodeRef}
+          {...attributes}
+          {...listeners}
+          aria-label={`Reorder ${project.name}`}
+          className="absolute right-2 top-2 hidden cursor-grab touch-none rounded-sm p-0.5 text-muted opacity-0 transition hover:text-foreground group-hover/proj:opacity-100 active:cursor-grabbing md:block"
+        >
+          <DotsSixVertical className="size-4" />
+        </button>
+      ) : null}
+    </li>
   );
 }
 
@@ -243,19 +221,20 @@ export function AppSidebar({
   );
   const [isNotificationsLoading, setIsNotificationsLoading] = useState(false);
   const [notificationsError, setNotificationsError] = useState<string | null>(null);
-  const [isNavigating, setIsNavigating] = useState(false);
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
   const navContextValue = useMemo(
-    () => ({ isNavigating, onNavigate: () => setIsNavigating(true) }),
-    [isNavigating],
+    () => ({ pendingHref, setPendingHref }),
+    [pendingHref],
   );
   // Failsafe: a cancelled or failed navigation never changes the pathname, so
-  // clear the flag on a timer too. The pathname effect below wins for a normal
-  // navigation and cancels this before it fires.
+  // clear the pending href on a timer too. The pathname effect below wins for a
+  // normal navigation and cancels this before it fires. A second click before
+  // then swaps the href, which restarts this timer.
   useEffect(() => {
-    if (!isNavigating) return;
-    const timer = setTimeout(() => setIsNavigating(false), 3000);
+    if (!pendingHref) return;
+    const timer = setTimeout(() => setPendingHref(null), 3000);
     return () => clearTimeout(timer);
-  }, [isNavigating]);
+  }, [pendingHref]);
 
   // Personal sidebar project order (drag-to-rearrange). Optimistic local copy of
   // the server-sorted list; resynced when the server order/membership changes.
@@ -299,7 +278,7 @@ export function AppSidebar({
     setMobileOpen(false);
     setNotifications(null);
     setNotificationsError(null);
-    setIsNavigating(false);
+    setPendingHref(null);
   }, [pathname]);
 
   // Sync the collapse mirror from the DOM attribute the boot script set.
@@ -1014,9 +993,12 @@ function NavSection({ label, first }: { label: string; first?: boolean }) {
 // One sidebar nav row. The label is wrapped in `.sidebar-collapsible` so CSS
 // hides it in the collapsed rail (leaving the centered icon); `title` gives a
 // native tooltip when collapsed.
+//
+// On click the row shows its active treatment and a pulse right away; the
+// previously-active row drops its treatment until the new route commits.
 function NavItem({
   href,
-  icon,
+  icon: Icon,
   label,
   active,
 }: {
@@ -1025,38 +1007,18 @@ function NavItem({
   label: string;
   active: boolean;
 }) {
-  const { onNavigate } = useContext(SidebarNavContext);
+  const { pendingHref, setPendingHref } = useContext(SidebarNavContext);
+  const pending = pendingHref === href;
+  const showActive = pending || (active && !pendingHref);
   return (
     <Link
       href={href}
       title={label}
-      className="block"
-      onNavigate={active ? undefined : onNavigate}
-    >
-      <NavItemRow icon={icon} label={label} active={active} />
-    </Link>
-  );
-}
-
-// Visual row for a nav link, split out so `useLinkStatus` can read this link's
-// own navigation state. While a click is pending the row takes the active
-// treatment and a soft pulse, so a slow route still gives immediate feedback.
-function NavItemRow({
-  icon: Icon,
-  label,
-  active,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  active: boolean;
-}) {
-  const { pending } = useLinkStatus();
-  const { isNavigating } = useContext(SidebarNavContext);
-  const showActive = pending || (active && !isNavigating);
-  return (
-    <span
+      // Clicking the active link never changes the pathname, so it must not
+      // arm the pending flag.
+      onNavigate={active ? undefined : () => setPendingHref(href)}
       className={cn(
-        "sidebar-navlink flex min-h-8 w-full items-center gap-2.5 rounded-sm px-2 py-1.5 text-[13px] font-medium transition",
+        "sidebar-navlink flex min-h-8 items-center gap-2.5 rounded-sm px-2 py-1.5 text-[13px] font-medium transition",
         showActive
           ? "bg-accent-soft text-foreground"
           : "text-muted hover:bg-surface hover:text-foreground",
@@ -1065,6 +1027,6 @@ function NavItemRow({
     >
       <Icon className="size-4 shrink-0" />
       <span className="sidebar-collapsible">{label}</span>
-    </span>
+    </Link>
   );
 }
