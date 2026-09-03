@@ -4,7 +4,12 @@ import { ProgressProvider } from "@bprogress/next/app";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
-    <ProgressProvider height="3px" color="var(--accent)" options={{ showSpinner: false }}>
+    <ProgressProvider
+      height="3px"
+      color="var(--accent)"
+      delay={120}
+      options={{ showSpinner: false }}
+    >
       {children}
     </ProgressProvider>
   );

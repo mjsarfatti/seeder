@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useState } from "react";
+import Link, { useLinkStatus } from "next/link";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import {
   DndContext,
@@ -72,6 +72,13 @@ type AppSidebarProps = {
 const SIDEBAR_RENDER_VERSION = "2026-05-04.3";
 const SIDEBAR_PROJECT_CAP = 8;
 
+// Shared client-navigation state for the sidebar links. `onNavigate` flips
+// `isNavigating` on the first click; it clears on the next pathname change.
+const SidebarNavContext = createContext<{
+  isNavigating: boolean;
+  onNavigate: () => void;
+}>({ isNavigating: false, onNavigate: () => {} });
+
 // One draggable row in the sidebar Project List. The whole row is the sortable
 // node; a grip handle (shown on hover, desktop only) carries the drag listeners
 // so the card's link stays clickable and touch-scrolling the sidebar still works.
@@ -95,22 +102,7 @@ function SidebarProjectRow({
     transition,
     isDragging,
   } = useSortable({ id: project.id, disabled: !draggable });
-
-  const hasColor = Boolean(project.color);
-  // Colored rows: soft tint when idle, deepen + invert text to white when
-  // active. Token rescope cascades to text-foreground / -muted-strong / -muted.
-  const colorStyle: React.CSSProperties | undefined = hasColor
-    ? isActive
-      ? {
-          backgroundColor: project.color!,
-          ["--foreground" as never]: "#ffffff",
-          ["--muted" as never]: "rgba(255,255,255,0.78)",
-          ["--muted-strong" as never]: "rgba(255,255,255,0.94)",
-        }
-      : {
-          backgroundColor: `color-mix(in srgb, ${project.color} 18%, transparent)`,
-        }
-    : undefined;
+  const { onNavigate } = useContext(SidebarNavContext);
 
   return (
     <li
@@ -120,45 +112,14 @@ function SidebarProjectRow({
     >
       <Link
         href={href}
-        className={cn(
-          "relative block rounded-sm py-1.5 pl-3 pr-2 transition",
-          isActive
-            ? hasColor
-              ? null
-              : "bg-accent-soft"
-            : hasColor
-              ? null
-              : "hover:bg-surface",
-        )}
-        style={colorStyle}
+        className="block"
+        onNavigate={isActive ? undefined : onNavigate}
       >
-        {isActive && !hasColor ? (
-          <span
-            aria-hidden
-            className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-accent animate-breathe"
-          />
-        ) : null}
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p
-              className={cn(
-                "truncate text-[13px] font-medium",
-                isActive ? "text-foreground" : "text-muted-strong",
-              )}
-            >
-              {project.name}
-            </p>
-            <p className="mt-0.5 inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.04em] text-muted">
-              {formatProjectStatus(project.status)}
-            </p>
-          </div>
-          <Kanban
-            className={cn(
-              "mt-0.5 size-4 shrink-0 text-muted transition",
-              draggable && "md:group-hover/proj:opacity-0",
-            )}
-          />
-        </div>
+        <SidebarProjectRowBody
+          project={project}
+          isActive={isActive}
+          draggable={draggable}
+        />
       </Link>
       {draggable ? (
         <button
@@ -173,6 +134,84 @@ function SidebarProjectRow({
         </button>
       ) : null}
     </li>
+  );
+}
+
+// Visual body of a project row, split out so `useLinkStatus` can read this
+// link's own navigation state. While a click is pending the row takes the
+// active treatment (edge marker or colored fill) and a soft pulse.
+function SidebarProjectRowBody({
+  project,
+  isActive,
+  draggable,
+}: {
+  project: ProjectListItem;
+  isActive: boolean;
+  draggable: boolean;
+}) {
+  const { pending } = useLinkStatus();
+  const { isNavigating } = useContext(SidebarNavContext);
+  const active = pending || (isActive && !isNavigating);
+
+  const hasColor = Boolean(project.color);
+  // Colored rows: soft tint when idle, deepen + invert text to white when
+  // active. Token rescope cascades to text-foreground / -muted-strong / -muted.
+  const colorStyle: React.CSSProperties | undefined = hasColor
+    ? active
+      ? {
+          backgroundColor: project.color!,
+          ["--foreground" as never]: "#ffffff",
+          ["--muted" as never]: "rgba(255,255,255,0.78)",
+          ["--muted-strong" as never]: "rgba(255,255,255,0.94)",
+        }
+      : {
+          backgroundColor: `color-mix(in srgb, ${project.color} 18%, transparent)`,
+        }
+    : undefined;
+
+  return (
+    <span
+      className={cn(
+        "relative block rounded-sm py-1.5 pl-3 pr-2 transition",
+        active
+          ? hasColor
+            ? null
+            : "bg-accent-soft"
+          : hasColor
+            ? null
+            : "hover:bg-surface",
+        pending && "animate-pulse motion-reduce:animate-none",
+      )}
+      style={colorStyle}
+    >
+      {active && !hasColor ? (
+        <span
+          aria-hidden
+          className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-accent animate-breathe"
+        />
+      ) : null}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p
+            className={cn(
+              "truncate text-[13px] font-medium",
+              active ? "text-foreground" : "text-muted-strong",
+            )}
+          >
+            {project.name}
+          </p>
+          <p className="mt-0.5 inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.04em] text-muted">
+            {formatProjectStatus(project.status)}
+          </p>
+        </div>
+        <Kanban
+          className={cn(
+            "mt-0.5 size-4 shrink-0 text-muted transition",
+            draggable && "md:group-hover/proj:opacity-0",
+          )}
+        />
+      </div>
+    </span>
   );
 }
 
@@ -204,6 +243,19 @@ export function AppSidebar({
   );
   const [isNotificationsLoading, setIsNotificationsLoading] = useState(false);
   const [notificationsError, setNotificationsError] = useState<string | null>(null);
+  const [isNavigating, setIsNavigating] = useState(false);
+  const navContextValue = useMemo(
+    () => ({ isNavigating, onNavigate: () => setIsNavigating(true) }),
+    [isNavigating],
+  );
+  // Failsafe: a cancelled or failed navigation never changes the pathname, so
+  // clear the flag on a timer too. The pathname effect below wins for a normal
+  // navigation and cancels this before it fires.
+  useEffect(() => {
+    if (!isNavigating) return;
+    const timer = setTimeout(() => setIsNavigating(false), 3000);
+    return () => clearTimeout(timer);
+  }, [isNavigating]);
 
   // Personal sidebar project order (drag-to-rearrange). Optimistic local copy of
   // the server-sorted list; resynced when the server order/membership changes.
@@ -247,6 +299,7 @@ export function AppSidebar({
     setMobileOpen(false);
     setNotifications(null);
     setNotificationsError(null);
+    setIsNavigating(false);
   }, [pathname]);
 
   // Sync the collapse mirror from the DOM attribute the boot script set.
@@ -380,7 +433,7 @@ export function AppSidebar({
   };
 
   return (
-    <>
+    <SidebarNavContext.Provider value={navContextValue}>
       {/* Mobile top bar — hamburger opens the drawer; hidden at md+. */}
       <header className="sticky top-0 z-30 flex items-center justify-between gap-2 border-b border-border bg-background px-3 py-2 md:hidden">
         <button
@@ -937,7 +990,7 @@ export function AppSidebar({
           </div>
         </div>
       ) : null}
-    </>
+    </SidebarNavContext.Provider>
   );
 }
 
@@ -963,7 +1016,7 @@ function NavSection({ label, first }: { label: string; first?: boolean }) {
 // native tooltip when collapsed.
 function NavItem({
   href,
-  icon: Icon,
+  icon,
   label,
   active,
 }: {
@@ -972,19 +1025,46 @@ function NavItem({
   label: string;
   active: boolean;
 }) {
+  const { onNavigate } = useContext(SidebarNavContext);
   return (
     <Link
       href={href}
       title={label}
+      className="block"
+      onNavigate={active ? undefined : onNavigate}
+    >
+      <NavItemRow icon={icon} label={label} active={active} />
+    </Link>
+  );
+}
+
+// Visual row for a nav link, split out so `useLinkStatus` can read this link's
+// own navigation state. While a click is pending the row takes the active
+// treatment and a soft pulse, so a slow route still gives immediate feedback.
+function NavItemRow({
+  icon: Icon,
+  label,
+  active,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  active: boolean;
+}) {
+  const { pending } = useLinkStatus();
+  const { isNavigating } = useContext(SidebarNavContext);
+  const showActive = pending || (active && !isNavigating);
+  return (
+    <span
       className={cn(
-        "sidebar-navlink flex min-h-8 items-center gap-2.5 rounded-sm px-2 py-1.5 text-[13px] font-medium transition",
-        active
+        "sidebar-navlink flex min-h-8 w-full items-center gap-2.5 rounded-sm px-2 py-1.5 text-[13px] font-medium transition",
+        showActive
           ? "bg-accent-soft text-foreground"
           : "text-muted hover:bg-surface hover:text-foreground",
+        pending && "animate-pulse motion-reduce:animate-none",
       )}
     >
       <Icon className="size-4 shrink-0" />
       <span className="sidebar-collapsible">{label}</span>
-    </Link>
+    </span>
   );
 }
